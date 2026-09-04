@@ -1,0 +1,6 @@
+{
+  "name": "Connectly",
+  "description": "A modern, trustworthy dating and matchmaking application featuring discovery, compatibility scoring, mutual matching, real-time chat, profile verification, and safety controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
