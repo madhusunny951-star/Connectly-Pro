@@ -161,7 +161,7 @@ apiRouter.delete('/profile/photos/:photoId', (req: Request, res: Response) => {
 apiRouter.put('/profile/photos/order', (req: Request, res: Response) => {
   try {
     const userId = getAuthenticatedUserId(req);
-    const { photoIds } = req.body;
+    const photoIds = req.body.photoIds || req.body.photo_ids;
     if (!Array.isArray(photoIds)) return res.status(400).json({ error: 'photoIds array required.' });
 
     const updatedPhotos = db.reorderPhotos(userId, photoIds);

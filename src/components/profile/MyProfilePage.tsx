@@ -1,10 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { api } from '../../services/api.ts';
 import { 
   Camera, CheckCircle2, ShieldCheck, Trash2, Plus, Star, 
-  Save, Eye, Sparkles, Heart, Check, ArrowUpRight 
+  Save, Eye, Sparkles, Heart, Check, ArrowUpRight, UploadCloud,
+  ChevronLeft, ChevronRight, Image as ImageIcon
 } from 'lucide-react';
+import { PhotoUploadModal } from './PhotoUploadModal.tsx';
+import { CURATED_PORTRAIT_PHOTOS } from '../../data/curatedPhotos.ts';
+import { processImageFile } from '../../utils/imageCompressor.ts';
 
 const ALL_INTERESTS = [
   'Music', 'Movies', 'Travel', 'Photography', 'Gaming', 'Fitness',
@@ -26,6 +30,10 @@ export const MyProfilePage: React.FC = () => {
   const [intention, setIntention] = useState<string>(user?.profile?.relationship_intention || 'Long-term relationship');
   const [interests, setInterests] = useState<string[]>(user?.interests || []);
   const [newPhotoUrl, setNewPhotoUrl] = useState<string>('');
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
+  const [isDraggingPhoto, setIsDraggingPhoto] = useState<boolean>(false);
+  const [photoActionLoading, setPhotoActionLoading] = useState<boolean>(false);
+  const directFileInputRef = useRef<HTMLInputElement>(null);
 
   const [saving, setSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
@@ -74,15 +82,88 @@ export const MyProfilePage: React.FC = () => {
     }
   };
 
+  const handleAddPhotoDirectly = async (imageUrl: string) => {
+    if (!imageUrl) return;
+    setPhotoActionLoading(true);
+    try {
+      await api.addPhoto(imageUrl);
+      const refreshed = await api.getProfile();
+      updateUser(refreshed);
+    } catch (e: any) {
+      alert(e.message || 'Failed to add photo.');
+    } finally {
+      setPhotoActionLoading(false);
+    }
+  };
+
   const handleAddPhoto = async () => {
     if (!newPhotoUrl.trim()) return;
     try {
-      await api.addPhoto(newPhotoUrl.trim());
-      const refreshed = await api.getProfile();
-      updateUser(refreshed);
+      await handleAddPhotoDirectly(newPhotoUrl.trim());
       setNewPhotoUrl('');
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const handleMakeCover = async (photoId: string) => {
+    if (!user?.photos) return;
+    const currentList = [...user.photos];
+    const targetIdx = currentList.findIndex(p => p.id === photoId);
+    if (targetIdx <= 0) return;
+    setPhotoActionLoading(true);
+    try {
+      const target = currentList.splice(targetIdx, 1)[0];
+      currentList.unshift(target);
+      await api.reorderPhotos(currentList.map(p => p.id));
+      const refreshed = await api.getProfile();
+      updateUser(refreshed);
+    } catch (e: any) {
+      console.error('Failed to make cover photo:', e);
+    } finally {
+      setPhotoActionLoading(false);
+    }
+  };
+
+  const handleMovePhoto = async (photoId: string, direction: 'left' | 'right') => {
+    if (!user?.photos) return;
+    const ids = user.photos.map(p => p.id);
+    const idx = ids.indexOf(photoId);
+    if (idx === -1) return;
+    const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= ids.length) return;
+    setPhotoActionLoading(true);
+    try {
+      const temp = ids[idx];
+      ids[idx] = ids[targetIdx];
+      ids[targetIdx] = temp;
+      await api.reorderPhotos(ids);
+      const refreshed = await api.getProfile();
+      updateUser(refreshed);
+    } catch (e) {
+      console.error('Failed to move photo:', e);
+    } finally {
+      setPhotoActionLoading(false);
+    }
+  };
+
+  const handleDirectFileSelect = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload an image file (JPEG, PNG, WebP).');
+      return;
+    }
+    if ((user?.photos?.length || 0) >= 6) {
+      alert('Maximum of 6 photos reached. Please remove one first.');
+      return;
+    }
+    setPhotoActionLoading(true);
+    try {
+      const dataUrl = await processImageFile(file);
+      await handleAddPhotoDirectly(dataUrl);
+    } catch (e: any) {
+      alert(e.message || 'Failed to process image file.');
+    } finally {
+      setPhotoActionLoading(false);
     }
   };
 
@@ -183,17 +264,62 @@ export const MyProfilePage: React.FC = () => {
       )}
 
       {/* Section 1: Photo Manager (#4) */}
-      <div className="bg-white/45 backdrop-blur-xl rounded-3xl p-6 border border-white/60 shadow-lg space-y-4">
-        <div className="flex items-center justify-between">
+      <div 
+        onDragOver={(e) => {
+          e.preventDefault();
+          setIsDraggingPhoto(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setIsDraggingPhoto(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDraggingPhoto(false);
+          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+            handleDirectFileSelect(e.dataTransfer.files[0]);
+          }
+        }}
+        className={`bg-white/45 backdrop-blur-xl rounded-3xl p-6 border transition-all shadow-lg space-y-4 ${
+          isDraggingPhoto 
+            ? 'border-rose-500 bg-rose-500/10 ring-4 ring-rose-200/50' 
+            : 'border-white/60'
+        }`}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-bold text-slate-900">Profile Photos</h3>
-            <p className="text-xs text-slate-500">
-              Add up to 6 photos. The first image will be your main card cover photo.
+            <div className="flex items-center space-x-2">
+              <h3 className="text-base font-bold text-slate-900">Profile Photos</h3>
+              <span className="px-2.5 py-0.5 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-700 text-[11px] font-bold">
+                {user?.photos?.length || 0} / 6
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Drag & drop photos anywhere here, or upload from device. The star sets your primary cover.
             </p>
           </div>
-          <span className="text-xs font-semibold text-slate-400">
-            {user?.photos?.length || 0} / 6
-          </span>
+
+          <div className="flex items-center gap-2">
+            <input
+              ref={directFileInputRef}
+              type="file"
+              accept="image/png, image/jpeg, image/webp"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleDirectFileSelect(e.target.files[0]);
+                }
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setIsUploadModalOpen(true)}
+              className="px-4 py-2 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white rounded-2xl text-xs font-bold shadow-sm shadow-rose-200/50 flex items-center space-x-1.5 transition-all"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Photos</span>
+            </button>
+          </div>
         </div>
 
         {/* Photos Grid */}
@@ -204,32 +330,129 @@ export const MyProfilePage: React.FC = () => {
               className="relative aspect-3/4 rounded-2xl overflow-hidden border border-white/60 group bg-slate-900 shadow-xs"
             >
               <img src={photo.image_url} alt="Profile" className="w-full h-full object-cover" />
+              
+              {/* Cover Badge */}
               {index === 0 && (
-                <span className="absolute top-2 left-2 bg-gradient-to-r from-rose-500 to-pink-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-xs">
-                  Cover
+                <span className="absolute top-2 left-2 bg-gradient-to-r from-rose-500 to-pink-600 text-white text-[9px] font-bold px-2 py-0.5 rounded-full shadow-xs flex items-center gap-0.5">
+                  <Star className="w-2.5 h-2.5 fill-white" />
+                  <span>Cover</span>
                 </span>
               )}
-              <button
-                onClick={() => handleDeletePhoto(photo.id)}
-                className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white hover:bg-rose-600 opacity-0 group-hover:opacity-100 transition-all backdrop-blur-xs"
-                title="Delete Photo"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
+
+              {/* Photo Controls Overlay */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2">
+                <div className="flex items-center justify-between">
+                  {/* Make Cover Button if not cover */}
+                  {index !== 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => handleMakeCover(photo.id)}
+                      className="p-1 rounded-lg bg-black/60 hover:bg-amber-500 text-white transition-colors"
+                      title="Set as Main Cover Photo"
+                    >
+                      <Star className="w-3 h-3" />
+                    </button>
+                  ) : <div />}
+
+                  {/* Delete Photo */}
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePhoto(photo.id)}
+                    className="p-1 rounded-lg bg-black/60 hover:bg-rose-600 text-white transition-colors"
+                    title="Delete Photo"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+
+                {/* Move Left / Right Controls */}
+                <div className="flex items-center justify-center gap-1">
+                  {index > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => handleMovePhoto(photo.id, 'left')}
+                      className="p-1 rounded-lg bg-black/60 hover:bg-white/30 text-white transition-colors"
+                      title="Move Left"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {index < (user?.photos?.length || 0) - 1 && (
+                    <button
+                      type="button"
+                      onClick={() => handleMovePhoto(photo.id, 'right')}
+                      className="p-1 rounded-lg bg-black/60 hover:bg-white/30 text-white transition-colors"
+                      title="Move Right"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           ))}
 
-          {/* Add photo slot */}
+          {/* Interactive Add Photo Slot */}
           {(user?.photos?.length || 0) < 6 && (
-            <div className="aspect-3/4 rounded-2xl border-2 border-dashed border-white/80 hover:border-rose-400 bg-white/20 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center transition-colors">
-              <Camera className="w-6 h-6 text-slate-400 mb-1" />
-              <span className="text-[10px] text-slate-500 font-medium">Add Photo</span>
-            </div>
+            <button
+              type="button"
+              onClick={() => setIsUploadModalOpen(true)}
+              className="aspect-3/4 rounded-2xl border-2 border-dashed border-white/80 hover:border-rose-400 bg-white/20 hover:bg-white/40 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center transition-all group cursor-pointer"
+            >
+              <div className="w-8 h-8 rounded-full bg-rose-500/10 group-hover:bg-rose-500/20 text-rose-600 flex items-center justify-center mb-1.5 transition-colors">
+                <Plus className="w-4 h-4" />
+              </div>
+              <span className="text-[11px] text-slate-700 font-bold">Add Photo</span>
+              <span className="text-[9px] text-slate-400 mt-0.5">Upload or Pick</span>
+            </button>
           )}
         </div>
 
+        {/* Quick Sample Portraits Suggestions */}
+        <div className="pt-2 border-t border-white/40">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+              <Sparkles className="w-3 h-3 text-rose-500" />
+              <span>Tap to instantly add curated dating portraits:</span>
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsUploadModalOpen(true)}
+              className="text-[11px] text-rose-600 font-semibold hover:underline"
+            >
+              Browse All
+            </button>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {CURATED_PORTRAIT_PHOTOS.slice(0, 6).map((preset) => {
+              const isAdded = user?.photos?.some(p => p.image_url === preset.url);
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  disabled={isAdded || (user?.photos?.length || 0) >= 6}
+                  onClick={() => handleAddPhotoDirectly(preset.url)}
+                  className={`w-14 h-18 rounded-2xl overflow-hidden border-2 relative shrink-0 transition-all ${
+                    isAdded 
+                      ? 'border-emerald-400 opacity-60 cursor-default' 
+                      : 'border-white/80 hover:border-rose-500 hover:scale-105 shadow-xs'
+                  }`}
+                  title={preset.title}
+                >
+                  <img src={preset.url} alt={preset.title} className="w-full h-full object-cover" />
+                  <span className={`absolute bottom-0 inset-x-0 text-[8px] text-center font-bold py-0.5 ${
+                    isAdded ? 'bg-emerald-600 text-white' : 'bg-black/60 text-white'
+                  }`}>
+                    {isAdded ? 'Added' : '+ Add'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Quick add image URL input */}
-        <div className="flex items-center gap-2 pt-2">
+        <div className="flex items-center gap-2 pt-1">
           <input
             type="url"
             value={newPhotoUrl}
@@ -243,7 +466,7 @@ export const MyProfilePage: React.FC = () => {
             className="px-4 py-2.5 bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-40 rounded-2xl text-xs font-semibold flex items-center space-x-1 shadow-xs"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Add</span>
+            <span>Add Link</span>
           </button>
         </div>
       </div>
@@ -441,6 +664,16 @@ export const MyProfilePage: React.FC = () => {
           </button>
         </div>
       </form>
+
+      {/* Photo Upload & Gallery Modal */}
+      <PhotoUploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        onAddPhoto={handleAddPhotoDirectly}
+        currentPhotosCount={user?.photos?.length || 0}
+        maxPhotos={6}
+        existingPhotoUrls={user?.photos?.map(p => p.image_url) || []}
+      />
 
     </div>
   );

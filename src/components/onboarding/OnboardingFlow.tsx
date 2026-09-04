@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { api } from '../../services/api.ts';
 import { 
   Check, ArrowRight, ArrowLeft, Camera, Sparkles, Heart, 
-  MapPin, Briefcase, GraduationCap, Plus, Trash2, ShieldCheck 
+  MapPin, Briefcase, GraduationCap, Plus, Trash2, ShieldCheck,
+  UploadCloud, Star, Link as LinkIcon, Loader2 
 } from 'lucide-react';
+import { processImageFile } from '../../utils/imageCompressor.ts';
+import { CURATED_PORTRAIT_PHOTOS } from '../../data/curatedPhotos.ts';
 
 const ALL_INTERESTS = [
   'Music', 'Movies', 'Travel', 'Photography', 'Gaming', 'Fitness',
@@ -57,6 +60,11 @@ export const OnboardingFlow: React.FC = () => {
   const [maxAge, setMaxAge] = useState<number>(user?.preferences?.age_max || 35);
   const [maxDistance, setMaxDistance] = useState<number>(user?.preferences?.distance_km || 30);
 
+  const [isDraggingPhoto, setIsDraggingPhoto] = useState<boolean>(false);
+  const [photoUrlInput, setPhotoUrlInput] = useState<string>('');
+  const [photoProcessing, setPhotoProcessing] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const handleInterestToggle = (item: string) => {
     setInterests(prev => 
       prev.includes(item) ? prev.filter(i => i !== item) : [...prev, item]
@@ -69,6 +77,33 @@ export const OnboardingFlow: React.FC = () => {
     }
   };
 
+  const handleSetMainPhoto = (idx: number) => {
+    if (idx <= 0 || idx >= photos.length) return;
+    const target = photos[idx];
+    const rest = photos.filter((_, i) => i !== idx);
+    setPhotos([target, ...rest]);
+  };
+
+  const handleUploadFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Please choose an image file (JPEG, PNG, WebP).');
+      return;
+    }
+    if (photos.length >= 6) {
+      alert('You have reached the limit of 6 photos.');
+      return;
+    }
+    setPhotoProcessing(true);
+    try {
+      const dataUrl = await processImageFile(file);
+      handleAddPhotoUrl(dataUrl);
+    } catch (e: any) {
+      alert(e.message || 'Failed to process selected picture.');
+    } finally {
+      setPhotoProcessing(false);
+    }
+  };
+
   const handleRemovePhoto = (idx: number) => {
     if (photos.length > 1) {
       setPhotos(prev => prev.filter((_, i) => i !== idx));
@@ -78,6 +113,7 @@ export const OnboardingFlow: React.FC = () => {
   const handleFinishOnboarding = async () => {
     setLoading(true);
     try {
+      // 1. Update basic profile info
       const updated = await api.updateProfile({
         name,
         age,
@@ -106,7 +142,23 @@ export const OnboardingFlow: React.FC = () => {
           relationship_intention: intention
         }
       });
-      updateUser(updated);
+
+      // 2. Persist chosen photos
+      if (photos && photos.length > 0) {
+        const existingUrls = updated?.photos?.map(p => p.image_url) || [];
+        for (const photoUrl of photos) {
+          if (!existingUrls.includes(photoUrl)) {
+            try {
+              await api.addPhoto(photoUrl);
+            } catch (e) {
+              console.warn('Could not add photo during onboarding sync:', e);
+            }
+          }
+        }
+      }
+
+      const refreshed = await api.getProfile();
+      updateUser(refreshed);
       navigateTo('/discover');
     } catch (err) {
       console.error('Error completing onboarding:', err);
@@ -220,53 +272,193 @@ export const OnboardingFlow: React.FC = () => {
 
         {/* STEP 2: Photos */}
         {step === 2 && (
-          <div className="space-y-5 animate-in fade-in duration-200">
-            <div>
-              <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Add Photos</h2>
-              <p className="text-xs text-slate-600 mt-1">
-                Upload at least 1 clear photo of yourself. Profiles with multiple photos receive 4x more mutual matches.
-              </p>
+          <div className="space-y-6 animate-in fade-in duration-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Add Photos</h2>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Upload at least 1 clear photo. Profiles with 3+ photos receive 4x more mutual matches. ({photos.length}/6)
+                </p>
+              </div>
+
+              {photos.length < 6 && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-4 py-2 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 text-white rounded-2xl text-xs font-bold shadow-xs flex items-center space-x-1.5 self-start sm:self-auto"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <span>Upload Picture</span>
+                </button>
+              )}
             </div>
 
-            {/* Current Selected Photos */}
-            <div className="grid grid-cols-3 gap-3">
-              {photos.map((url, i) => (
-                <div key={i} className="relative aspect-3/4 rounded-2xl overflow-hidden border border-white/80 group bg-white/40 shadow-xs">
-                  <img src={url} alt={`Upload ${i}`} className="w-full h-full object-cover" />
-                  {i === 0 && (
-                    <span className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-600 text-white shadow-xs">
-                      Main Photo
-                    </span>
-                  )}
-                  {photos.length > 1 && (
-                    <button
-                      onClick={() => handleRemovePhoto(i)}
-                      className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white hover:bg-rose-600 transition-colors opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png, image/jpeg, image/webp"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleUploadFile(e.target.files[0]);
+                }
+              }}
+            />
+
+            {/* Drag & Drop Upload Zone if photos < 6 */}
+            {photos.length < 6 && (
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDraggingPhoto(true);
+                }}
+                onDragLeave={(e) => {
+                  e.preventDefault();
+                  setIsDraggingPhoto(false);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDraggingPhoto(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleUploadFile(e.dataTransfer.files[0]);
+                  }
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-3xl p-5 sm:p-6 text-center cursor-pointer transition-all ${
+                  isDraggingPhoto
+                    ? 'border-rose-500 bg-rose-500/10 scale-[1.01]'
+                    : 'border-white/80 hover:border-rose-400 bg-white/30 hover:bg-white/50'
+                }`}
+              >
+                <div className="w-10 h-10 rounded-2xl bg-rose-500/10 text-rose-600 flex items-center justify-center mx-auto mb-2 shadow-xs">
+                  {photoProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <UploadCloud className="w-5 h-5" />}
                 </div>
-              ))}
+                <p className="text-xs font-bold text-slate-800">
+                  {photoProcessing ? 'Optimizing photo...' : 'Click to upload or drag & drop photo here'}
+                </p>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  High-res JPG, PNG, or WebP from your device
+                </p>
+              </div>
+            )}
+
+            {/* Current Selected Photos Grid */}
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-2">
+                Your Selected Photos:
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                {photos.map((url, i) => (
+                  <div key={i} className="relative aspect-3/4 rounded-2xl overflow-hidden border border-white/80 group bg-slate-900 shadow-xs">
+                    <img src={url} alt={`Upload ${i}`} className="w-full h-full object-cover" />
+                    
+                    {i === 0 && (
+                      <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-bold bg-gradient-to-r from-rose-500 to-pink-600 text-white shadow-xs flex items-center gap-0.5">
+                        <Star className="w-2.5 h-2.5 fill-white" />
+                        <span>Main</span>
+                      </span>
+                    )}
+
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-between p-2">
+                      {i !== 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => handleSetMainPhoto(i)}
+                          className="p-1 rounded-lg bg-black/60 hover:bg-amber-500 text-white transition-colors"
+                          title="Set as Main Photo"
+                        >
+                          <Star className="w-3.5 h-3.5" />
+                        </button>
+                      ) : <div />}
+
+                      {photos.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePhoto(i)}
+                          className="p-1 rounded-lg bg-black/60 hover:bg-rose-600 text-white transition-colors"
+                          title="Remove Photo"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {photos.length < 6 && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="aspect-3/4 rounded-2xl border-2 border-dashed border-white/80 hover:border-rose-400 bg-white/20 hover:bg-white/40 backdrop-blur-xs flex flex-col items-center justify-center p-2 text-center transition-all cursor-pointer group"
+                  >
+                    <Plus className="w-5 h-5 text-rose-500 mb-1 group-hover:scale-110 transition-transform" />
+                    <span className="text-[10px] text-slate-700 font-bold">Add Pic</span>
+                  </button>
+                )}
+              </div>
             </div>
 
-            {/* Quick add sample photo presets */}
-            <div>
-              <p className="text-xs font-semibold text-slate-700 mb-2">Select to add sample portraits:</p>
+            {/* Curated Sample Portraits Library */}
+            <div className="pt-2 border-t border-white/40">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Choose from curated portraits:</span>
+                </p>
+                <span className="text-[10px] text-slate-500">Tap to add</span>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {CURATED_PORTRAIT_PHOTOS.slice(0, 8).map((preset) => {
+                  const isAdded = photos.includes(preset.url);
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      disabled={isAdded || photos.length >= 6}
+                      onClick={() => handleAddPhotoUrl(preset.url)}
+                      className={`w-14 h-18 rounded-2xl overflow-hidden border-2 relative shrink-0 transition-all ${
+                        isAdded 
+                          ? 'border-emerald-400 opacity-60 cursor-default' 
+                          : 'border-white/80 hover:border-rose-500 hover:scale-105 shadow-xs'
+                      }`}
+                      title={preset.title}
+                    >
+                      <img src={preset.url} alt={preset.title} className="w-full h-full object-cover" />
+                      <span className={`absolute bottom-0 inset-x-0 text-[8px] text-center font-bold py-0.5 ${
+                        isAdded ? 'bg-emerald-600 text-white' : 'bg-black/60 text-white'
+                      }`}>
+                        {isAdded ? 'Added' : '+ Add'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Quick URL Input */}
+            <div className="pt-1">
               <div className="flex gap-2">
-                {PRESET_SAMPLE_PHOTOS.map((preset, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleAddPhotoUrl(preset)}
-                    className="w-14 h-18 rounded-2xl overflow-hidden border-2 border-white/80 hover:border-rose-500 transition-all shrink-0 relative shadow-xs"
-                  >
-                    <img src={preset} alt="Preset" className="w-full h-full object-cover" />
-                    <span className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[9px] text-center font-bold">
-                      + Add
-                    </span>
-                  </button>
-                ))}
+                <input
+                  type="url"
+                  value={photoUrlInput}
+                  onChange={(e) => setPhotoUrlInput(e.target.value)}
+                  placeholder="Or paste an image URL..."
+                  className="flex-1 text-xs p-2.5 rounded-2xl border border-white/80 bg-white/60 focus:bg-white/90 focus:border-rose-400 outline-none backdrop-blur-md transition-all text-slate-800 placeholder:text-slate-400 shadow-xs"
+                />
+                <button
+                  type="button"
+                  disabled={!photoUrlInput.trim() || photos.length >= 6}
+                  onClick={() => {
+                    if (photoUrlInput.trim()) {
+                      handleAddPhotoUrl(photoUrlInput.trim());
+                      setPhotoUrlInput('');
+                    }
+                  }}
+                  className="px-4 py-2 bg-slate-800 text-white hover:bg-slate-900 rounded-2xl text-xs font-semibold disabled:opacity-40 transition-all shadow-xs"
+                >
+                  Add Link
+                </button>
               </div>
             </div>
           </div>
