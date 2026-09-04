@@ -20,7 +20,11 @@ interface DatabaseSchema {
   notifications: NotificationItem[];
 }
 
-const DB_FILE = path.join(process.cwd(), 'data_connectly_db.json');
+// Resolve writable DB path: Netlify/AWS Lambda uses /tmp, standard Node uses process.cwd()
+const IS_SERVERLESS = !!(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT);
+const DB_FILE = IS_SERVERLESS
+  ? path.join('/tmp', 'data_connectly_db.json')
+  : path.join(process.cwd(), 'data_connectly_db.json');
 
 // Calculate age from date_of_birth
 export function calculateAge(dobString: string): number {
@@ -1112,6 +1116,17 @@ class DatabaseService {
         const fileContent = fs.readFileSync(DB_FILE, 'utf-8');
         return JSON.parse(fileContent);
       }
+      // If running on Netlify/Lambda, attempt to read initial snapshot from cwd
+      const seedFilePath = path.join(process.cwd(), 'data_connectly_db.json');
+      if (fs.existsSync(seedFilePath)) {
+        const fileContent = fs.readFileSync(seedFilePath, 'utf-8');
+        try {
+          fs.writeFileSync(DB_FILE, fileContent, 'utf-8');
+        } catch {
+          // ignore
+        }
+        return JSON.parse(fileContent);
+      }
     } catch (err) {
       console.warn('Could not read existing database file, initializing fresh:', err);
     }
@@ -1123,7 +1138,7 @@ class DatabaseService {
     try {
       fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
     } catch (err) {
-      console.error('Failed to persist database:', err);
+      console.warn('Database save warning (in-memory state retained):', err);
     }
   }
 

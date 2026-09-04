@@ -433,6 +433,30 @@ export const SettingsPage: React.FC = () => {
               ))}
             </div>
           </div>
+
+          <div className="p-4 bg-sky-500/10 border border-sky-400/30 rounded-2xl text-xs space-y-2">
+            <div className="flex items-center space-x-2 font-bold text-sky-950">
+              <span className="w-2.5 h-2.5 rounded-full bg-teal-500 inline-block animate-pulse"></span>
+              <span>Netlify Deployment Architecture</span>
+            </div>
+            <p className="text-[11px] text-sky-900 leading-relaxed">
+              Connectly includes full configuration for seamless Netlify hosting:
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px] font-mono text-slate-700">
+              <div className="p-2 rounded-xl bg-white/70 border border-sky-100">
+                <span className="font-bold block text-slate-900">netlify.toml</span>
+                <span>Build & SPA redirects</span>
+              </div>
+              <div className="p-2 rounded-xl bg-white/70 border border-sky-100">
+                <span className="font-bold block text-slate-900">public/_redirects</span>
+                <span>Vite asset routing</span>
+              </div>
+              <div className="p-2 rounded-xl bg-white/70 border border-sky-100">
+                <span className="font-bold block text-slate-900">netlify/functions/api.ts</span>
+                <span>Express Serverless Lambda</span>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

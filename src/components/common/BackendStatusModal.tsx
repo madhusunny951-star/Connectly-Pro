@@ -193,6 +193,17 @@ export const BackendStatusModal: React.FC<BackendStatusModalProps> = ({ isOpen, 
           </div>
         </div>
 
+        {/* Netlify Readiness Info */}
+        <div className="p-3 bg-sky-500/10 border border-sky-400/30 rounded-2xl text-xs space-y-1">
+          <div className="flex items-center space-x-1.5 font-bold text-sky-900">
+            <span className="w-2 h-2 rounded-full bg-teal-500 inline-block"></span>
+            <span>Netlify Deployment Ready</span>
+          </div>
+          <p className="text-[11px] text-sky-800 leading-relaxed">
+            Configured with <code className="bg-white/60 px-1 py-0.5 rounded font-mono text-[10px]">netlify.toml</code>, <code className="bg-white/60 px-1 py-0.5 rounded font-mono text-[10px]">public/_redirects</code>, and serverless function adapter in <code className="bg-white/60 px-1 py-0.5 rounded font-mono text-[10px]">netlify/functions/api.ts</code>.
+          </p>
+        </div>
+
         {/* Footer Actions */}
         <div className="pt-2 flex justify-end">
           <button
